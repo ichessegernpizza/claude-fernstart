@@ -283,10 +283,18 @@ async function send(cmd, args, timeoutMs) {
     }, timeoutMs || TIMEOUT_MS);
     pending.set(id, { resolve, reject, timer });
   });
-  const res = await fetch(`${RELAY}/${K.cmdTopic}`, { method: "POST", body });
+  const drop = () => { const p = pending.get(id); if (p) clearTimeout(p.timer); pending.delete(id); };
+  let res;
+  try {
+    res = await fetch(`${RELAY}/${K.cmdTopic}`, { method: "POST", body });
+  } catch {
+    drop();
+    result.catch(() => {});
+    throw new Error("Keine Internetverbindung am Handy.");
+  }
   if (!res.ok) {
-    pending.get(id) && clearTimeout(pending.get(id).timer);
-    pending.delete(id);
+    drop();
+    result.catch(() => {});
     throw new Error(res.status === 429 ? "Zu viele Anfragen, kurz warten." : "Relay nicht erreichbar (" + res.status + ").");
   }
   return result;
@@ -296,7 +304,7 @@ function onReply(r) {
   if (r.kind === "status" && r.ok && r.ts >= lastStatusTs) {
     lastStatusTs = r.ts;
     lastStatus = r.data;
-    render();
+    if (pcState !== "ok") setHeader("ok"); else render();
   }
   const p = r.re && pending.get(r.re);
   if (p) {
@@ -368,7 +376,7 @@ function render() {
   }
   const needsLogin = data.claude.found && data.claude.loggedIn === false;
   if (needsLogin && !$("loginBox").hasChildNodes()) renderLogin();
-  if (!needsLogin && $("loginBox").hasChildNodes()) { login = null; $("loginBox").innerHTML = ""; }
+  if (!needsLogin && $("loginBox").hasChildNodes()) { login = null; saveLogin(); $("loginBox").innerHTML = ""; }
 
   const box = $("servers");
   box.innerHTML = "";
@@ -394,6 +402,8 @@ function renderLogin() {
   } else {
     const input = el("input", { type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: "false",
       placeholder: "Code hier einfügen" });
+    input.value = login.code || "";
+    input.oninput = () => { login.code = input.value; };
     card.append(
       el("p", {}, "1. Anmelde-Seite öffnen, auf „Autorisieren“ tippen und den angezeigten Code kopieren."),
       el("div", { class: "row" }, el("a", { class: "btn primary", href: login.url, target: "_blank", rel: "noopener" }, "Anmelde-Seite öffnen")),
@@ -405,17 +415,40 @@ function renderLogin() {
   box.append(card);
 }
 
+// Nur echte Claude-Adressen anzeigen, auch falls am anderen Ende nicht der eigene PC sitzt.
+function claudeUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && /(^|\.)claude\.(ai|com)$/.test(u.hostname) ? u.href : null;
+  } catch { return null; }
+}
+
+// Offene Anmeldung merken (15 min, wie am PC), damit ein Neuladen den kopierten Code nicht wertlos macht.
+function saveLogin() {
+  if (login && login.url) store.set("fernstart.login", JSON.stringify({ url: login.url, t: Date.now() }));
+  else store.del("fernstart.login");
+}
+function restoreLogin() {
+  try {
+    const l = JSON.parse(store.get("fernstart.login") || "null");
+    if (l && Date.now() - l.t < 14 * 60000 && claudeUrl(l.url)) login = { url: l.url };
+  } catch {}
+}
+
 async function startLogin() {
   if (login && login.busy) return;
   login = { busy: true };
   renderLogin();
   try {
     const d = await send("login_start", {}, 40000);
-    login = { url: d.url };
+    const url = claudeUrl(d.url);
+    if (!url) throw new Error("Unerwarteter Anmelde-Link vom PC.");
+    login = { url };
   } catch (e) {
     login = null;
     toast(e.message);
   }
+  saveLogin();
   renderLogin();
 }
 
@@ -428,13 +461,15 @@ async function finishLogin(code) {
   try {
     await send("login_code", { code }, 70000);
     login = null;
+    saveLogin();
     $("loginBox").innerHTML = "";
     toast("Angemeldet. Remote Control startet jetzt.");
     requestStatus(true);
   } catch (e) {
-    // Bei falschem Format oder Zeitüberschreitung bleibt die Anmeldung am PC offen: Link behalten.
-    const retry = /sieht nicht richtig aus|antwortet nicht/.test(e.message);
-    login = retry ? { url: login.url } : null;
+    // Bei falschem Format oder Zeitüberschreitung bleibt die Anmeldung am PC offen: Link und Code behalten.
+    const retry = /sieht nicht richtig aus|antwortet nicht|Internetverbindung/.test(e.message);
+    login = retry ? { url: login.url, code } : null;
+    saveLogin();
     toast(e.message);
     renderLogin();
     if (!retry) requestStatus(true);
@@ -461,8 +496,9 @@ function serverCard(s) {
 
   const row = el("div", { class: "row" });
   if (running) {
-    row.append(el("a", { class: "btn primary", href: s.url || "https://claude.ai/code", target: "_blank", rel: "noopener" },
-      s.url ? "In Claude öffnen" : "Claude öffnen"));
+    const url = claudeUrl(s.url);
+    row.append(el("a", { class: "btn primary", href: url || "https://claude.ai/code", target: "_blank", rel: "noopener" },
+      url ? "In Claude öffnen" : "Claude öffnen"));
     row.append(el("button", { type: "button", onclick: () => act("stop", s, "Gestoppt.") }, "Stoppen"));
   } else {
     row.append(el("button", { class: "primary", type: "button", onclick: () => act("resume", s, "Wird gestartet…") }, "Starten"));
@@ -510,6 +546,7 @@ async function act(cmd, s, msg, extra) {
     toast(msg);
   } catch (e) {
     toast(e.message);
+    if (lastStatus) render(); // z. B. den Schalter „Immer an“ auf den echten Stand zurücksetzen
   }
 }
 
@@ -599,6 +636,7 @@ $("startBtn").onclick = async () => {
 // Einmal-Code: Anfrage auf den aus dem Code abgeleiteten Themen, der PC antwortet mit dem Schlüssel.
 async function pairWithCode(code) {
   code = (code || "").trim().replace(/^.*#pair=/, "");
+  $("code").value = code;
   const previous = store.get("fernstart.key");
   $("mainView").classList.add("hidden");
   $("pairView").classList.remove("hidden");
@@ -650,9 +688,20 @@ if (!window.isSecureContext || !window.CompressionStream) {
 } else {
   const p = location.hash.match(/pair=([A-Za-z0-9-]+)/);
   const m = location.hash.match(/(?:^#|&)k=([A-Za-z0-9_-]+)/);
+  const stored = store.get("fernstart.key");
   // Gespeicherter Schlüssel gewinnt: ein altes Startbildschirm-Symbol mit #k= soll eine neue Kopplung nicht überschreiben.
-  const saved = store.get("fernstart.key") || (m && m[1]);
-  if (p) pairWithCode(p[1]);
+  const saved = stored || (m && m[1]);
+  let tried = [];
+  try { tried = JSON.parse(store.get("fernstart.triedCodes") || "[]"); } catch {}
+  const code = p && p[1].toUpperCase();
+  // Ein Kopplungslink ersetzt eine bestehende Kopplung nie stillschweigend (könnte ein fremder "PC" sein),
+  // und ein schon probierter Code (z. B. als Startadresse gespeichert) wird nicht bei jedem Start wiederholt.
+  const usePair = code && (!stored || (!tried.includes(code) &&
+    confirm("Dieses Handy ist schon mit einem PC gekoppelt. Durch diesen Link ersetzen?\n" +
+            "Nur bestätigen, wenn du den Code gerade an deinem eigenen PC erzeugt hast.")));
+  if (code) store.set("fernstart.triedCodes", JSON.stringify([...tried, code].slice(-20)));
+  restoreLogin();
+  if (usePair) pairWithCode(code);
   else if (saved) pair(saved);
   else showPair();
 }
