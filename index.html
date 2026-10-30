@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Claude Fernstart</title>
+<meta name="theme-color" content="#1f2937">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fernstart">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #111827; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #e8892f; --accent-text: #ffffff; --ok: #16a34a; --warn: #d97706; --err: #dc2626;
+    --chip: #f3f4f6; --input: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --card: #181b21; --text: #f3f4f6; --muted: #9ca3af; --line: #2a2f38;
+      --accent: #f59e42; --accent-text: #1a1206; --ok: #22c55e; --warn: #f59e0b; --err: #f87171;
+      --chip: #232831; --input: #11141a; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 12px; padding: 18px 0 14px; }
+  header img { width: 40px; height: 40px; border-radius: 10px; }
+  header h1 { font-size: 20px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 6px; }
+  header .spacer { flex: 1; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; flex: 0 0 auto; }
+  .dot.ok { background: var(--ok); } .dot.err { background: var(--err); } .dot.wait { background: var(--warn); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 17px; margin: 0 0 4px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .banner { border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; font-size: 15px; border: 1px solid; }
+  .banner.warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .banner.err { border-color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+  .banner code { font-size: 14px; }
+  label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 6px; }
+  select, input[type=text] { width: 100%; font: inherit; color: var(--text); background: var(--input);
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px; min-height: 48px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  button, a.btn { font: inherit; font-weight: 600; border: 1px solid var(--line); background: var(--chip); color: var(--text);
+    border-radius: 12px; padding: 12px 16px; min-height: 48px; cursor: pointer; text-decoration: none;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: 1 1 auto; }
+  button.primary, a.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button.danger { color: var(--err); }
+  button.link { background: none; border: none; color: var(--muted); font-weight: 500; flex: 0 0 auto; padding: 8px; min-height: 0; }
+  button:disabled { opacity: .55; cursor: default; }
+  .big { width: 100%; font-size: 18px; min-height: 56px; }
+  .server-top { display: flex; align-items: flex-start; gap: 10px; }
+  .server-top .grow { flex: 1; min-width: 0; }
+  .path { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .pill { font-size: 13px; font-weight: 600; border-radius: 999px; padding: 3px 10px; white-space: nowrap; background: var(--chip); }
+  .pill.running { color: var(--ok); } .pill.starting { color: var(--warn); }
+  .pill.error, .pill.paused { color: var(--err); } .pill.stopped { color: var(--muted); }
+  .err-text { color: var(--err); font-size: 14px; margin-top: 8px; overflow-wrap: anywhere; }
+  .toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; font-size: 15px; }
+  .switch { position: relative; width: 52px; height: 32px; flex: 0 0 auto; margin: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch span { position: absolute; inset: 0; background: var(--line); border-radius: 999px; transition: .2s; }
+  .switch span::after { content: ""; position: absolute; width: 26px; height: 26px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  .switch input:checked + span { background: var(--ok); }
+  .switch input:checked + span::after { transform: translateX(20px); }
+  pre { background: var(--input); border: 1px solid var(--line); border-radius: 12px; padding: 10px; font-size: 12px;
+    max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 12px 0 0; }
+  .empty { text-align: center; padding: 22px 16px; }
+  .hidden { display: none !important; }
+  .toast { position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); max-width: 528px; margin: 0 auto;
+    background: var(--text); color: var(--bg); padding: 12px 16px; border-radius: 12px; font-size: 15px; z-index: 10; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <img src="icon-192.png" alt="">
+  <div>
+    <h1>Claude Fernstart</h1>
+    <div class="sub"><span id="dot" class="dot"></span><span id="host">Verbinde…</span></div>
+  </div>
+  <div class="spacer"></div>
+  <button id="unpair" class="link hidden" type="button">Entkoppeln</button>
+</header>
+
+<section id="pairView" class="card hidden">
+  <h2>Mit dem PC koppeln</h2>
+  <p class="muted">Öffne den Kopplungslink, den du bekommen hast, oder gib den Einmal-Code ein.
+    Einen neuen Code gibt es am PC mit <b>koppeln.cmd</b> im Ordner claude-fernstart.</p>
+  <label for="code">Einmal-Code</label>
+  <input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX">
+  <div class="row"><button id="pairBtn" class="primary big" type="button">Verbinden</button></div>
+</section>
+
+<main id="mainView" class="hidden">
+  <div id="banners"></div>
+  <div id="loginBox"></div>
+  <div id="servers"></div>
+
+  <section class="card">
+    <h2>Remote Control starten</h2>
+    <p class="muted">Startet Remote Control auf dem PC. Danach findest du die Session in der Claude-App unter Code.</p>
+    <label for="folder">Ordner</label>
+    <select id="folder"></select>
+    <details>
+      <summary>Weitere Optionen</summary>
+      <label for="name">Name in Claude</label>
+      <input id="name" type="text" maxlength="60" placeholder="Ordnername">
+      <label for="mode">Berechtigungen für neue Sessions</label>
+      <select id="mode">
+        <option value="default">Standard (fragt nach)</option>
+        <option value="acceptEdits">Dateiänderungen automatisch erlauben</option>
+        <option value="auto">Auto-Modus</option>
+        <option value="plan">Nur planen</option>
+      </select>
+    </details>
+    <div class="toggle">
+      <span>Immer an<br><span class="muted">Startet nach Absturz oder PC-Neustart von selbst</span></span>
+      <label class="switch"><input id="keep" type="checkbox" checked><span></span></label>
+    </div>
+    <div class="row"><button id="startBtn" class="primary big" type="button">Remote Control starten</button></div>
+  </section>
+
+  <div class="row">
+    <button id="reload" type="button">Aktualisieren</button>
+    <a class="btn" href="https://claude.ai/code" target="_blank" rel="noopener">Claude Code öffnen</a>
+  </div>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+const RELAY = "https://ntfy.sh";
+const TIMEOUT_MS = 15000;
+const $ = (id) => document.getElementById(id);
+const STATUS = { running: "Läuft", starting: "Startet…", stopped: "Gestoppt", error: "Fehler", paused: "Pausiert" };
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+
+// ---------------------------------------------------------------- Verschlüsselung (Gegenstück: server.py)
+const te = new TextEncoder();
+let K = null;       // { cmdTopic, statusTopic, enc, mac }
+let keyText = null;
+
+function b64url(bytes) {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function unb64url(text) {
+  const s = atob(text.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((text.length + 3) % 4));
+  return Uint8Array.from(s, (c) => c.charCodeAt(0));
+}
+function concat(...parts) {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let i = 0;
+  for (const p of parts) { out.set(p, i); i += p.length; }
+  return out;
+}
+const importHmac = (raw) => crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+const sign = async (key, data) => new Uint8Array(await crypto.subtle.sign("HMAC", key, data));
+async function pipe(bytes, stream) {
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+}
+
+async function deriveKeys(text) {
+  const k = unb64url(text);
+  if (k.length !== 32) throw new Error("Schlüssel ungültig.");
+  const master = await importHmac(k);
+  const hex = [...await sign(master, te.encode("fernstart-topic"))].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+  return {
+    cmdTopic: `fs-${hex}-c`,
+    statusTopic: `fs-${hex}-s`,
+    enc: await importHmac(await sign(master, te.encode("fernstart-enc"))),
+    mac: await importHmac(await sign(master, te.encode("fernstart-mac"))),
+  };
+}
+
+async function keystream(keys, nonce, n) {
+  const blocks = Math.ceil(n / 32);
+  const parts = await Promise.all(Array.from({ length: blocks }, (_, i) => {
+    const d = new Uint8Array(20);
+    d.set(nonce);
+    new DataView(d.buffer).setUint32(16, i);
+    return sign(keys.enc, d);
+  }));
+  return concat(...parts).subarray(0, n);
+}
+
+async function seal(keys, obj) {
+  const plain = await pipe(te.encode(JSON.stringify(obj)), new CompressionStream("deflate"));
+  const nonce = crypto.getRandomValues(new Uint8Array(16));
+  const ks = await keystream(keys, nonce, plain.length);
+  const head = concat(Uint8Array.of(1), nonce, plain.map((b, i) => b ^ ks[i]));
+  const tag = (await sign(keys.mac, head)).subarray(0, 16);
+  return b64url(concat(head, tag));
+}
+
+async function unseal(keys, text) {
+  const raw = unb64url(text.trim());
+  if (raw.length < 33 || raw[0] !== 1) throw new Error("ungültig");
+  const body = raw.subarray(0, raw.length - 16);
+  const tag = raw.subarray(raw.length - 16);
+  const expect = (await sign(keys.mac, body)).subarray(0, 16);
+  if (expect.some((b, i) => b !== tag[i])) throw new Error("Signatur falsch");
+  const ct = raw.subarray(17, raw.length - 16);
+  const ks = await keystream(keys, raw.subarray(1, 17), ct.length);
+  const plain = await pipe(ct.map((b, i) => b ^ ks[i]), new DecompressionStream("deflate"));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+// Einmal-Code -> eigener Schlüsselsatz (PBKDF2, wie pair_keys() in server.py)
+async function pairKeys(code) {
+  const normalized = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (normalized.length !== 10) throw new Error("Der Code hat 10 Zeichen, z. B. ABCDE-FGH23.");
+  const base = await crypto.subtle.importKey("raw", te.encode(normalized), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: te.encode("claude-fernstart-pair"), iterations: 200000, hash: "SHA-256" }, base, 256);
+  return deriveKeys(b64url(new Uint8Array(bits)));
+}
+
+// ---------------------------------------------------------------- Relay
+const pending = new Map(); // Befehls-ID -> { resolve, reject, timer }
+let events = null;
+let lastStatus = null;
+let lastStatusTs = 0;
+let pcState = "wait"; // ok | wait | err
+let openLogs = new Map(); // id -> Logtext
+let login = null; // { url, busy } während der CLI-Anmeldung
+
+function subscribe(keys, since, onMessage) {
+  const es = new EventSource(`${RELAY}/${keys.statusTopic}/sse?since=${since}`);
+  es.onmessage = async (ev) => {
+    let m;
+    try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.event && m.event !== "message") return;
+    let reply;
+    try { reply = await unseal(keys, m.message || ""); } catch { return; }
+    onMessage(reply);
+  };
+  return es;
+}
+
+function connect() {
+  if (events) events.close();
+  events = subscribe(K, "latest", onReply);
+}
+
+async function publish(keys, cmd, args) {
+  const id = b64url(crypto.getRandomValues(new Uint8Array(12)));
+  const body = await seal(keys, { id, ts: Date.now() / 1000, cmd, args: args || {} });
+  const res = await fetch(`${RELAY}/${keys.cmdTopic}`, { method: "POST", body });
+  if (!res.ok) throw new Error(res.status === 429 ? "Zu viele Anfragen, kurz warten." : "Relay nicht erreichbar (" + res.status + ").");
+  return id;
+}
+
+async function send(cmd, args, timeoutMs) {
+  const id = b64url(crypto.getRandomValues(new Uint8Array(12)));
+  const body = await seal(K, { id, ts: Date.now() / 1000, cmd, args: args || {} });
+  const result = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error("Der PC antwortet nicht. Ist er an und nicht im Ruhezustand?"));
+    }, timeoutMs || TIMEOUT_MS);
+    pending.set(id, { resolve, reject, timer });
+  });
+  const res = await fetch(`${RELAY}/${K.cmdTopic}`, { method: "POST", body });
+  if (!res.ok) {
+    pending.get(id) && clearTimeout(pending.get(id).timer);
+    pending.delete(id);
+    throw new Error(res.status === 429 ? "Zu viele Anfragen, kurz warten." : "Relay nicht erreichbar (" + res.status + ").");
+  }
+  return result;
+}
+
+function onReply(r) {
+  if (r.kind === "status" && r.ok && r.ts >= lastStatusTs) {
+    lastStatusTs = r.ts;
+    lastStatus = r.data;
+    render();
+  }
+  const p = r.re && pending.get(r.re);
+  if (p) {
+    clearTimeout(p.timer);
+    pending.delete(r.re);
+    r.ok ? p.resolve(r.data) : p.reject(new Error(r.error || "Fehler"));
+  }
+}
+
+async function requestStatus(refresh) {
+  if (pcState !== "ok") setHeader("wait");
+  try {
+    await send("status", refresh ? { refresh: true } : {});
+    setHeader("ok");
+  } catch (e) {
+    setHeader("err", e.message);
+  }
+}
+
+// ---------------------------------------------------------------- Oberfläche
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.remove("hidden");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.add("hidden"), 3500);
+}
+
+function fmtTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const today = new Date().toDateString() === d.toDateString();
+  return (today ? "" : d.toLocaleDateString("de-DE") + " ") + d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+}
+
+function setHeader(state, msg) {
+  pcState = state;
+  $("dot").className = "dot " + state;
+  const host = lastStatus ? "PC " + lastStatus.host : "PC";
+  if (state === "ok") $("host").textContent = host + " ist an";
+  else if (state === "wait") $("host").textContent = "Frage " + host + "…";
+  else $("host").textContent = host + " nicht erreichbar" + (lastStatusTs ? " · zuletzt " + fmtTime(lastStatusTs) : "");
+  if (state === "err" && msg) toast(msg);
+  if (lastStatus) render();
+}
+
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n[k] = v;
+    else n.setAttribute(k, v);
+  }
+  for (const kid of kids) if (kid != null) n.append(kid);
+  return n;
+}
+
+function render() {
+  const data = lastStatus;
+  const banners = $("banners");
+  banners.innerHTML = "";
+  if (pcState === "err") {
+    banners.append(el("div", { class: "banner err" },
+      "Der PC antwortet nicht. Er muss an sein (nicht im Ruhezustand) und Internet haben. Die Liste unten ist der letzte bekannte Stand."));
+  }
+  if (!data) return;
+  if (!data.claude.found) {
+    banners.append(el("div", { class: "banner err" }, "Claude-CLI auf dem PC nicht gefunden. Ist die Claude-Desktop-App installiert?"));
+  }
+  const needsLogin = data.claude.found && data.claude.loggedIn === false;
+  if (needsLogin && !$("loginBox").hasChildNodes()) renderLogin();
+  if (!needsLogin && $("loginBox").hasChildNodes()) { login = null; $("loginBox").innerHTML = ""; }
+
+  const box = $("servers");
+  box.innerHTML = "";
+  if (!data.servers.length) {
+    box.append(el("section", { class: "card empty muted" }, "Noch keine Remote Control eingerichtet."));
+    return;
+  }
+  for (const s of data.servers) box.append(serverCard(s));
+}
+
+// Eigener Bereich, der nur bei Zustandswechseln neu gezeichnet wird (sonst ginge der eingetippte Code verloren).
+function renderLogin() {
+  const box = $("loginBox");
+  box.innerHTML = "";
+  const card = el("section", { class: "card banner warn" },
+    el("h2", {}, "Claude am PC anmelden"),
+    el("p", { class: "muted" }, "Einmalig nötig, damit der PC Remote Control starten darf. Dauert eine Minute."));
+  if (!login || !login.url) {
+    card.append(el("div", { class: "row" }, el("button", { class: "primary", type: "button", onclick: startLogin },
+      login && login.busy ? "Hole Anmelde-Link…" : "Jetzt anmelden")));
+  } else {
+    const input = el("input", { type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: "false",
+      placeholder: "Code hier einfügen" });
+    card.append(
+      el("p", {}, "1. Anmelde-Seite öffnen, auf „Autorisieren“ tippen und den angezeigten Code kopieren."),
+      el("div", { class: "row" }, el("a", { class: "btn primary", href: login.url, target: "_blank", rel: "noopener" }, "Anmelde-Seite öffnen")),
+      el("p", { style: "margin-top:14px" }, "2. Hierher zurück und den Code einfügen:"),
+      input,
+      el("div", { class: "row" }, el("button", { class: "primary", type: "button", onclick: () => finishLogin(input.value) },
+        login.busy ? "Melde an…" : "Anmelden")));
+  }
+  box.append(card);
+}
+
+async function startLogin() {
+  login = { busy: true };
+  renderLogin();
+  try {
+    const d = await send("login_start", {}, 40000);
+    login = { url: d.url };
+  } catch (e) {
+    login = null;
+    toast(e.message);
+  }
+  renderLogin();
+}
+
+async function finishLogin(code) {
+  code = (code || "").trim();
+  if (!code) return toast("Bitte zuerst den Code einfügen.");
+  login.busy = true;
+  renderLogin();
+  try {
+    await send("login_code", { code }, 70000);
+    login = null;
+    $("loginBox").innerHTML = "";
+    toast("Angemeldet. Remote Control kann jetzt starten.");
+    requestStatus(true);
+  } catch (e) {
+    login = null;
+    toast(e.message);
+    renderLogin();
+  }
+}
+
+function serverCard(s) {
+  const running = s.status === "running" || s.status === "starting";
+  const since = running ? "seit " + fmtTime(s.startedAt) : (s.stoppedAt ? "gestoppt " + fmtTime(s.stoppedAt) : "");
+  const card = el("section", { class: "card" },
+    el("div", { class: "server-top" },
+      el("div", { class: "grow" },
+        el("h2", {}, s.name),
+        el("div", { class: "path" }, s.folder),
+        el("div", { class: "muted" }, since + (s.permissionMode && s.permissionMode !== "default" ? " · " + s.permissionMode : ""))),
+      el("span", { class: "pill " + s.status }, STATUS[s.status] || s.status)));
+
+  if ((s.status === "error" || s.status === "paused") && s.error) {
+    card.append(el("div", { class: "err-text" }, s.error));
+  }
+  if (s.status === "paused") {
+    card.append(el("div", { class: "muted", style: "margin-top:6px" }, "Zu viele Abstürze – automatischer Neustart pausiert 10 Minuten."));
+  }
+
+  const row = el("div", { class: "row" });
+  if (running) {
+    row.append(el("a", { class: "btn primary", href: s.url || "https://claude.ai/code", target: "_blank", rel: "noopener" },
+      s.url ? "In Claude öffnen" : "Claude öffnen"));
+    row.append(el("button", { type: "button", onclick: () => act("stop", s, "Gestoppt.") }, "Stoppen"));
+  } else {
+    row.append(el("button", { class: "primary", type: "button", onclick: () => act("resume", s, "Wird gestartet…") }, "Starten"));
+  }
+  card.append(row);
+
+  const keep = el("input", { type: "checkbox" });
+  keep.checked = !!s.keep;
+  keep.onchange = () => act("keep", s, keep.checked ? "Bleibt immer an." : "Nicht mehr dauerhaft.", { keep: keep.checked });
+  card.append(el("div", { class: "toggle" }, el("span", {}, "Immer an"), el("label", { class: "switch" }, keep, el("span"))));
+
+  card.append(el("div", { class: "row" },
+    el("button", { type: "button", onclick: () => act("restart", s, "Neu gestartet.") }, "Neu starten"),
+    el("button", { type: "button", onclick: () => toggleLog(s.id) }, openLogs.has(s.id) ? "Log ausblenden" : "Log"),
+    el("button", { class: "danger", type: "button", onclick: () => {
+      if (confirm(`„${s.name}“ stoppen und entfernen?`)) act("remove", s, "Entfernt.");
+    } }, "Entfernen")));
+
+  if (openLogs.has(s.id)) {
+    const pre = el("pre", {}, openLogs.get(s.id) || "Lade Log…");
+    card.append(pre);
+    requestAnimationFrame(() => { pre.scrollTop = pre.scrollHeight; });
+  }
+  return card;
+}
+
+async function toggleLog(id) {
+  if (openLogs.has(id)) { openLogs.delete(id); return render(); }
+  openLogs.set(id, "");
+  render();
+  try {
+    const d = await send("log", { id });
+    openLogs.set(id, d.log || "(leer)");
+  } catch (e) {
+    openLogs.set(id, e.message);
+  }
+  render();
+}
+
+async function act(cmd, s, msg, extra) {
+  toast("Sende an PC…");
+  try {
+    await send(cmd, { id: s.id, ...(extra || {}) });
+    setHeader("ok");
+    toast(msg);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+function fillFolders(folders) {
+  const sel = $("folder");
+  const last = store.get("fernstart.folder");
+  sel.innerHTML = "";
+  const groups = { favorite: "Favoriten", folder: "Ordner", root: "Basisordner" };
+  for (const [kind, label] of Object.entries(groups)) {
+    const items = folders.filter((f) => f.kind === kind);
+    if (!items.length) continue;
+    const g = el("optgroup", { label });
+    for (const f of items) {
+      const o = el("option", { value: f.path }, f.name);
+      if (f.path === last) o.selected = true;
+      g.append(o);
+    }
+    sel.append(g);
+  }
+}
+
+async function loadFolders() {
+  try { fillFolders(JSON.parse(store.get("fernstart.folders") || "[]")); } catch {}
+  try {
+    const { folders } = await send("folders");
+    store.set("fernstart.folders", JSON.stringify(folders));
+    fillFolders(folders);
+  } catch {}
+}
+
+// ---------------------------------------------------------------- Kopplung
+function keepKeyInUrl() {
+  // Startbildschirm-Apps (v. a. iOS) haben eigenen Speicher: Schlüssel bleibt im #-Teil der Adresse.
+  if (keyText && location.hash !== "#k=" + keyText) history.replaceState(null, "", "#k=" + keyText);
+}
+
+function showPair(msg) {
+  K = keyText = null;
+  if (events) events.close();
+  store.del("fernstart.key");
+  if (location.hash) history.replaceState(null, "", location.pathname);
+  $("pairView").classList.remove("hidden");
+  $("mainView").classList.add("hidden");
+  $("unpair").classList.add("hidden");
+  $("host").textContent = "Nicht gekoppelt";
+  $("dot").className = "dot";
+  if (msg) toast(msg);
+}
+
+async function pair(text) {
+  text = (text || "").trim().replace(/^.*#k=/, "");
+  try {
+    K = await deriveKeys(text);
+  } catch {
+    return showPair("Schlüssel ungültig.");
+  }
+  keyText = text;
+  store.set("fernstart.key", text);
+  keepKeyInUrl();
+  $("pairView").classList.add("hidden");
+  $("mainView").classList.remove("hidden");
+  $("unpair").classList.remove("hidden");
+  connect();
+  await requestStatus(false);
+  loadFolders();
+}
+
+$("startBtn").onclick = async () => {
+  const folder = $("folder").value;
+  if (!folder) return toast("Bitte einen Ordner wählen.");
+  store.set("fernstart.folder", folder);
+  $("startBtn").disabled = true;
+  toast("Sende an PC…");
+  try {
+    await send("start", { folder, name: $("name").value, permissionMode: $("mode").value, keep: $("keep").checked });
+    setHeader("ok");
+    toast("Remote Control startet. Gleich in der Claude-App unter Code sichtbar.");
+    $("name").value = "";
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    $("startBtn").disabled = false;
+  }
+};
+
+// Einmal-Code: Anfrage auf den aus dem Code abgeleiteten Themen, der PC antwortet mit dem Schlüssel.
+async function pairWithCode(code) {
+  code = (code || "").trim().replace(/^.*#pair=/, "");
+  $("pairView").classList.remove("hidden");
+  $("pairBtn").disabled = true;
+  $("pairBtn").textContent = "Kopple mit PC…";
+  let es = null;
+  try {
+    const keys = await pairKeys(code);
+    const key = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Keine Antwort vom PC. Code abgelaufen, schon benutzt, oder der PC ist aus.")), 30000);
+      // Antworten der letzten Minute mitnehmen, falls die Verbindung erst nach der Antwort steht.
+      es = subscribe(keys, Math.floor(Date.now() / 1000) - 60, (r) => {
+        if (r.kind === "pair" && r.ok && r.data && r.data.key) { clearTimeout(timer); resolve(r.data.key); }
+      });
+      publish(keys, "pair", {}).catch((e) => { clearTimeout(timer); reject(e); });
+    });
+    es.close();
+    await pair(key);
+    toast("Gekoppelt mit PC " + (lastStatus ? lastStatus.host : "") + ".");
+  } catch (e) {
+    if (es) es.close();
+    showPair(e.message);
+  } finally {
+    $("pairBtn").disabled = false;
+    $("pairBtn").textContent = "Verbinden";
+  }
+}
+
+$("pairBtn").onclick = () => pairWithCode($("code").value);
+$("code").addEventListener("keydown", (e) => { if (e.key === "Enter") pairWithCode($("code").value); });
+$("unpair").onclick = () => { if (confirm("Dieses Handy vom PC entkoppeln?")) showPair(); };
+$("reload").onclick = () => { requestStatus(true); loadFolders(); };
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && K) { connect(); requestStatus(false); }
+});
+
+if (!window.isSecureContext || !window.CompressionStream) {
+  document.body.innerHTML = "<p style='padding:24px'>Dieser Browser wird nicht unterstützt (HTTPS und aktueller Browser nötig).</p>";
+} else {
+  const p = location.hash.match(/pair=([A-Za-z0-9-]+)/);
+  const m = location.hash.match(/(?:^#|&)k=([A-Za-z0-9_-]+)/);
+  const saved = (m && m[1]) || store.get("fernstart.key");
+  if (p) pairWithCode(p[1]);
+  else if (saved) pair(saved);
+  else showPair();
+}
+</script>
+</body>
+</html>
