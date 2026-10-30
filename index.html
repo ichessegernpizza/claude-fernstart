@@ -237,28 +237,38 @@ let pcState = "wait"; // ok | wait | err
 let openLogs = new Map(); // id -> Logtext
 let login = null; // { url, busy } während der CLI-Anmeldung
 
-function subscribe(keys, since, onMessage) {
+function subscribe(keys, since, onMessage, onOpen) {
   const es = new EventSource(`${RELAY}/${keys.statusTopic}/sse?since=${since}`);
+  if (onOpen) es.onopen = onOpen;
   es.onmessage = async (ev) => {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
     if (m.event && m.event !== "message") return;
     let reply;
     try { reply = await unseal(keys, m.message || ""); } catch { return; }
-    onMessage(reply);
+    onMessage(reply, m);
   };
   return es;
 }
 
+let lastEventId = null; // letzte ntfy-Nachricht: beim Wiederverbinden ab hier weiterlesen
+let reconnectTimer = null;
+
 function connect() {
   if (events) events.close();
-  events = subscribe(K, "latest", onReply);
+  clearTimeout(reconnectTimer);
+  const es = subscribe(K, lastEventId || "latest", (r, m) => { if (m.id) lastEventId = m.id; onReply(r); });
+  // Bei HTTP-Fehlern gibt EventSource endgültig auf; dann selbst neu verbinden.
+  es.onerror = () => {
+    if (es === events && es.readyState === EventSource.CLOSED) reconnectTimer = setTimeout(connect, 5000);
+  };
+  events = es;
 }
 
-async function publish(keys, cmd, args) {
+async function publish(keys, cmd, args, cache = true) {
   const id = b64url(crypto.getRandomValues(new Uint8Array(12)));
   const body = await seal(keys, { id, ts: Date.now() / 1000, cmd, args: args || {} });
-  const res = await fetch(`${RELAY}/${keys.cmdTopic}`, { method: "POST", body });
+  const res = await fetch(`${RELAY}/${keys.cmdTopic}` + (cache ? "" : "?cache=no"), { method: "POST", body });
   if (!res.ok) throw new Error(res.status === 429 ? "Zu viele Anfragen, kurz warten." : "Relay nicht erreichbar (" + res.status + ").");
   return id;
 }
@@ -312,7 +322,7 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.remove("hidden");
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.add("hidden"), 3500);
+  toast.timer = setTimeout(() => t.classList.add("hidden"), Math.max(3500, msg.length * 70));
 }
 
 function fmtTime(ts) {
@@ -376,9 +386,11 @@ function renderLogin() {
   const card = el("section", { class: "card banner warn" },
     el("h2", {}, "Claude am PC anmelden"),
     el("p", { class: "muted" }, "Einmalig nötig, damit der PC Remote Control starten darf. Dauert eine Minute."));
+  const busy = !!(login && login.busy);
+  const btn = (attrs, label) => el("button", busy ? { ...attrs, disabled: "" } : attrs, label);
   if (!login || !login.url) {
-    card.append(el("div", { class: "row" }, el("button", { class: "primary", type: "button", onclick: startLogin },
-      login && login.busy ? "Hole Anmelde-Link…" : "Jetzt anmelden")));
+    card.append(el("div", { class: "row" }, btn({ class: "primary", type: "button", onclick: startLogin },
+      busy ? "Hole Anmelde-Link…" : "Jetzt anmelden")));
   } else {
     const input = el("input", { type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: "false",
       placeholder: "Code hier einfügen" });
@@ -387,13 +399,14 @@ function renderLogin() {
       el("div", { class: "row" }, el("a", { class: "btn primary", href: login.url, target: "_blank", rel: "noopener" }, "Anmelde-Seite öffnen")),
       el("p", { style: "margin-top:14px" }, "2. Hierher zurück und den Code einfügen:"),
       input,
-      el("div", { class: "row" }, el("button", { class: "primary", type: "button", onclick: () => finishLogin(input.value) },
-        login.busy ? "Melde an…" : "Anmelden")));
+      el("div", { class: "row" }, btn({ class: "primary", type: "button", onclick: () => finishLogin(input.value) },
+        busy ? "Melde an…" : "Anmelden")));
   }
   box.append(card);
 }
 
 async function startLogin() {
+  if (login && login.busy) return;
   login = { busy: true };
   renderLogin();
   try {
@@ -409,18 +422,22 @@ async function startLogin() {
 async function finishLogin(code) {
   code = (code || "").trim();
   if (!code) return toast("Bitte zuerst den Code einfügen.");
+  if (login.busy) return;
   login.busy = true;
   renderLogin();
   try {
     await send("login_code", { code }, 70000);
     login = null;
     $("loginBox").innerHTML = "";
-    toast("Angemeldet. Remote Control kann jetzt starten.");
+    toast("Angemeldet. Remote Control startet jetzt.");
     requestStatus(true);
   } catch (e) {
-    login = null;
+    // Bei falschem Format oder Zeitüberschreitung bleibt die Anmeldung am PC offen: Link behalten.
+    const retry = /sieht nicht richtig aus|antwortet nicht/.test(e.message);
+    login = retry ? { url: login.url } : null;
     toast(e.message);
     renderLogin();
+    if (!retry) requestStatus(true);
   }
 }
 
@@ -549,6 +566,7 @@ async function pair(text) {
   } catch {
     return showPair("Schlüssel ungültig.");
   }
+  if (text !== keyText) lastEventId = null;
   keyText = text;
   store.set("fernstart.key", text);
   keepKeyInUrl();
@@ -581,6 +599,8 @@ $("startBtn").onclick = async () => {
 // Einmal-Code: Anfrage auf den aus dem Code abgeleiteten Themen, der PC antwortet mit dem Schlüssel.
 async function pairWithCode(code) {
   code = (code || "").trim().replace(/^.*#pair=/, "");
+  const previous = store.get("fernstart.key");
+  $("mainView").classList.add("hidden");
   $("pairView").classList.remove("hidden");
   $("pairBtn").disabled = true;
   $("pairBtn").textContent = "Kopple mit PC…";
@@ -589,18 +609,28 @@ async function pairWithCode(code) {
     const keys = await pairKeys(code);
     const key = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Keine Antwort vom PC. Code abgelaufen, schon benutzt, oder der PC ist aus.")), 30000);
-      // Antworten der letzten Minute mitnehmen, falls die Verbindung erst nach der Antwort steht.
-      es = subscribe(keys, Math.floor(Date.now() / 1000) - 60, (r) => {
+      let sent = false;
+      // Anfrage und Antwort laufen mit cache=no (ntfy speichert sie nicht), darum erst senden, wenn wir zuhören.
+      es = subscribe(keys, "latest", (r) => {
         if (r.kind === "pair" && r.ok && r.data && r.data.key) { clearTimeout(timer); resolve(r.data.key); }
+      }, () => {
+        if (sent) return;
+        sent = true;
+        publish(keys, "pair", {}, false).catch((e) => { clearTimeout(timer); reject(e); });
       });
-      publish(keys, "pair", {}).catch((e) => { clearTimeout(timer); reject(e); });
     });
     es.close();
     await pair(key);
     toast("Gekoppelt mit PC " + (lastStatus ? lastStatus.host : "") + ".");
   } catch (e) {
     if (es) es.close();
-    showPair(e.message);
+    if (previous) {
+      // Alter Link nochmal angetippt o. Ä.: den funktionierenden Zugang nicht verlieren.
+      toast(e.message + " Der bisherige Zugang bleibt aktiv.");
+      await pair(previous);
+    } else {
+      showPair(e.message);
+    }
   } finally {
     $("pairBtn").disabled = false;
     $("pairBtn").textContent = "Verbinden";
@@ -610,7 +640,7 @@ async function pairWithCode(code) {
 $("pairBtn").onclick = () => pairWithCode($("code").value);
 $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") pairWithCode($("code").value); });
 $("unpair").onclick = () => { if (confirm("Dieses Handy vom PC entkoppeln?")) showPair(); };
-$("reload").onclick = () => { requestStatus(true); loadFolders(); };
+$("reload").onclick = () => { connect(); requestStatus(true); loadFolders(); };
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && K) { connect(); requestStatus(false); }
 });
@@ -620,7 +650,8 @@ if (!window.isSecureContext || !window.CompressionStream) {
 } else {
   const p = location.hash.match(/pair=([A-Za-z0-9-]+)/);
   const m = location.hash.match(/(?:^#|&)k=([A-Za-z0-9_-]+)/);
-  const saved = (m && m[1]) || store.get("fernstart.key");
+  // Gespeicherter Schlüssel gewinnt: ein altes Startbildschirm-Symbol mit #k= soll eine neue Kopplung nicht überschreiben.
+  const saved = store.get("fernstart.key") || (m && m[1]);
   if (p) pairWithCode(p[1]);
   else if (saved) pair(saved);
   else showPair();
